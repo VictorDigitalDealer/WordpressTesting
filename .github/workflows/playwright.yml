@@ -2,7 +2,7 @@ name: Playwright Every 10m
 
 on:
   schedule:
-    - cron: "*/10 * * * *"  # cada 10 minutos (UTC)
+    - cron: "0 16 * * *"  # 16:00 UTC
   workflow_dispatch: {}
 
 permissions:
