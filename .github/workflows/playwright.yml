@@ -41,7 +41,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
-      # No pases --reporter; usamos lo definido en playwright.config.*
+      # No pases --reporter en CLI; usamos lo definido en playwright.config.*
       - name: Run tests (capture exit code)
         id: run_tests
         shell: bash
@@ -50,8 +50,15 @@ jobs:
           npx playwright test
           CODE=$?
           echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
-          # seguimos para subir artefactos y enviar email
           exit 0
+
+      - name: Zip HTML report (always)
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "playwright-report" ]; then
+            zip -rq playwright-report.zip playwright-report
+          fi
 
       - name: Upload HTML report (always)
         if: always()
@@ -71,14 +78,13 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      # Subimos media sin warnings solo si existe
       - name: Upload videos & screenshots (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: media
-          path: |
-            test-results
-            playwright-report/assets
+          path: test-results
           retention-days: 7
           if-no-files-found: ignore
 
@@ -91,7 +97,6 @@ jobs:
           STATUS="passed"
           if [ "${{ steps.run_tests.outputs.exit_code }}" != "0" ]; then STATUS="failed"; fi
 
-          # métricas desde playwright-results.json (si falta, cuenta 0)
           PASSED=$(jq '[.suites[]?.specs[]?.tests[]? | select(any(.results[]?; .status=="passed"))] | length' playwright-results.json 2>/dev/null || echo 0)
           FAILED=$(jq '[.suites[]?.specs[]?.tests[]? | select(any(.results[]?; .status=="failed"))] | length' playwright-results.json 2>/dev/null || echo 0)
           SKIPPED=$(jq '[.suites[]?.specs[]?.tests[]? | select(all(.results[]?; .status=="skipped"))] | length' playwright-results.json 2>/dev/null || echo 0)
@@ -116,20 +121,52 @@ jobs:
           sed -i "s|{{REPO}}|${{ github.repository }}|g" email.html
           sed -i "s|{{BRANCH}}|${{ github.ref_name }}|g" email.html
 
-      - name: Send email (with ZIP if small)
+      # Chequea tamaño del ZIP (8MB máx adjunto)
+      - name: Check ZIP size
         if: always()
+        id: zipcheck
+        shell: bash
+        run: |
+          if [ -f "playwright-report.zip" ]; then
+            SIZE=$( (stat -c%s playwright-report.zip 2>/dev/null || stat -f%z playwright-report.zip) )
+            echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+            if [ "$SIZE" -le 8000000 ]; then
+              echo "ok=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+
+      # ENVÍO con 465+SSL (tu caso)
+      - name: Send email (with ZIP)
+        if: always() && steps.zipcheck.outputs.ok == 'true'
         uses: dawidd6/action-send-mail@v4
         with:
           server_address: ${{ secrets.SMTP_HOST }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          secure: true  
+          server_port: 465
+          secure: true
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASS }}
-          subject: "Playwright: ${{ steps.run_tests.outputs.exit_code == '0' && 'OK' || 'FALLOS' }} – ${{ github.repository }}@${{ github.ref_name }}"
+          from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.REPORT_TO }}
-          from: ${{ secrets.SMTP_USER }}   # <- igual que el usuario SMTP
+          subject: "Playwright (con adjunto): ${{ steps.run_tests.outputs.exit_code == '0' && 'OK' || 'FALLOS' }} – ${{ github.repository }}@${{ github.ref_name }}"
           content_type: text/html
           body: file://email.html
           attachments: |
             playwright-report.zip
-  
+
+      - name: Send email (no attachment)
+        if: always() && (steps.zipcheck.outputs.ok != 'true')
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: 465
+          secure: true
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          from: ${{ secrets.SMTP_USER }}
+          to: ${{ secrets.REPORT_TO }}
+          subject: "Playwright (sin adjunto): ${{ steps.run_tests.outputs.exit_code == '0' && 'OK' || 'FALLOS' }} – ${{ github.repository }}@${{ github.ref_name }}"
+          content_type: text/html
+          body: file://email.html
