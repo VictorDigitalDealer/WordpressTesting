@@ -1,15 +1,15 @@
-name: Playwright Every 10m
+name: Playwright Daily @16:00 UTC
 
 on:
   schedule:
-    - cron: "0 16 * * *"  # 16:00 UTC
+    - cron: "0 16 * * *"  # 16:00 UTC (18:00 Europe/Madrid ahora)
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
 concurrency:
-  group: playwright-10m
+  group: playwright-daily
   cancel-in-progress: true
 
 jobs:
@@ -41,18 +41,37 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
-      - name: Run tests
-        run: npx playwright test --reporter=list,html
+      # No pases --reporter; usamos lo definido en playwright.config.*
+      - name: Run tests (capture exit code)
+        id: run_tests
+        shell: bash
+        run: |
+          set +e
+          npx playwright test
+          CODE=$?
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          # seguimos para subir artefactos y enviar email
+          exit 0
 
-      - name: Upload HTML report
+      - name: Upload HTML report (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: playwright-report
           retention-days: 7
+          if-no-files-found: warn
 
-      - name: Upload videos & screenshots
+      - name: Upload results JSON (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: playwright-results.json
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload videos & screenshots (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -61,3 +80,52 @@ jobs:
             test-results
             playwright-report/assets
           retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Build email summary
+        if: always()
+        id: email_body
+        shell: bash
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          STATUS="passed"
+          if [ "${{ steps.run_tests.outputs.exit_code }}" != "0" ]; then STATUS="failed"; fi
+
+          # métricas desde playwright-results.json (si falta, cuenta 0)
+          PASSED=$(jq '[.suites[]?.specs[]?.tests[]? | select(any(.results[]?; .status=="passed"))] | length' playwright-results.json 2>/dev/null || echo 0)
+          FAILED=$(jq '[.suites[]?.specs[]?.tests[]? | select(any(.results[]?; .status=="failed"))] | length' playwright-results.json 2>/dev/null || echo 0)
+          SKIPPED=$(jq '[.suites[]?.specs[]?.tests[]? | select(all(.results[]?; .status=="skipped"))] | length' playwright-results.json 2>/dev/null || echo 0)
+
+          cat > email.html << 'EOF'
+          <h2>Resultados Playwright: {{STATUS}}</h2>
+          <ul>
+            <li>✅ Pasados: {{PASSED}}</li>
+            <li>❌ Fallados: {{FAILED}}</li>
+            <li>⏭️ Omitidos: {{SKIPPED}}</li>
+          </ul>
+          <p>Descarga el <b>reporte HTML</b> y media desde los artefactos del run:</p>
+          <p><a href="{{RUN_URL}}">{{RUN_URL}}</a></p>
+          <p>Repo: <code>{{REPO}}</code> • Rama: <code>{{BRANCH}}</code></p>
+          EOF
+
+          sed -i "s/{{STATUS}}/$STATUS/g" email.html
+          sed -i "s/{{PASSED}}/$PASSED/g" email.html
+          sed -i "s/{{FAILED}}/$FAILED/g" email.html
+          sed -i "s/{{SKIPPED}}/$SKIPPED/g" email.html
+          sed -i "s|{{RUN_URL}}|$RUN_URL|g" email.html
+          sed -i "s|{{REPO}}|${{ github.repository }}|g" email.html
+          sed -i "s|{{BRANCH}}|${{ github.ref_name }}|g" email.html
+
+      - name: Send email
+        if: always()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "Playwright: ${{ steps.run_tests.outputs.exit_code == '0' && 'OK' || 'FALLOS' }} – ${{ github.repository }}@${{ github.ref_name }}"
+          to: ${{ secrets.REPORT_TO }}
+          from: ${{ secrets.REPORT_FROM }}
+          content_type: text/html
+          body: file://email.html
