@@ -125,7 +125,7 @@ jobs:
       # ENVÍO con 465+SSL (tu caso)
       - name: Send email (with ZIP)
         if: always() && steps.zipcheck.outputs.ok == 'true'
-        uses: dawidd6/action-send-mail@v4
+        uses: dawidd6/action-send-mail@v6
         with:
           server_address: ${{ secrets.SMTP_HOST }}
           server_port: 465
@@ -134,15 +134,20 @@ jobs:
           password: ${{ secrets.SMTP_PASS }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.REPORT_TO }}
-          subject: "Playwright (con adjunto): ${{ steps.run_tests.outputs.exit_code == '0' && 'OK' || 'FALLOS' }} – ${{ github.repository }}@${{ github.ref_name }}"
-          content_type: text/html
-          body: file://email.html
+          subject: "${{ steps.run_tests.outputs.exit_code == '0' && '✅' || '❌' }} Playwright – ${{ github.repository }}@${{ github.ref_name }}"
+          # cuerpo de texto (fallback)
+          body: |
+            Resultados Playwright: ${{ steps.run_tests.outputs.exit_code == '0' && 'PASSED' || 'FAILED' }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # cuerpo HTML desde archivo
+          html_body: file://email.html
           attachments: |
             playwright-report.zip
 
+
       - name: Send email (no attachment)
         if: always() && (steps.zipcheck.outputs.ok != 'true')
-        uses: dawidd6/action-send-mail@v4
+        uses: dawidd6/action-send-mail@v6
         with:
           server_address: ${{ secrets.SMTP_HOST }}
           server_port: 465
@@ -151,6 +156,9 @@ jobs:
           password: ${{ secrets.SMTP_PASS }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.REPORT_TO }}
-          subject: "Playwright (sin adjunto): ${{ steps.run_tests.outputs.exit_code == '0' && 'OK' || 'FALLOS' }} – ${{ github.repository }}@${{ github.ref_name }}"
-          content_type: text/html
-          body: file://email.html
+          subject: "${{ steps.run_tests.outputs.exit_code == '0' && '✅' || '❌' }} Playwright – ${{ github.repository }}@${{ github.ref_name }}"
+          body: |
+            Resultados Playwright: ${{ steps.run_tests.outputs.exit_code == '0' && 'PASSED' || 'FAILED' }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          html_body: file://email.html
+          
