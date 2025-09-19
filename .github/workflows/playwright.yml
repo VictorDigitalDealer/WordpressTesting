@@ -98,6 +98,11 @@ jobs:
           STATUS: ${{ steps.run_tests.outputs.exit_code == '0' && 'passed' || 'failed' }}
           COMMIT_SHA: ${{ github.sha }}
           ACTOR: ${{ github.actor }}
+
+      - name: Show email header (debug)
+        if: always()
+        run: |
+          head -n 30 email.html || true
         
 
       # Chequea tamaño del ZIP (8MB máx adjunto)
