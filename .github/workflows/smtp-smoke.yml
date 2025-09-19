@@ -1,0 +1,32 @@
+name: SMTP Smoke (465 SSL)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  send-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check TCP/SSL to SMTP:465
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y openssl
+          echo | openssl s_client -connect "${{ secrets.SMTP_HOST }}:465" -brief || true
+
+      - name: Send test email (465 SSL)
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: 465          # ← fijo a 465
+          secure: true              # ← obligatorio con 465 (SSL)
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          from: ${{ secrets.SMTP_USER }}   # muchos servidores lo exigen
+          to: ${{ secrets.REPORT_TO }}
+          subject: "SMTP Smoke ✓ (465 SSL)"
+          content_type: text/plain
+          body: |
+            Hola, prueba simple por 465+SSL desde GitHub Actions.
+            Host: ${{ secrets.SMTP_HOST }}
+            User/From: ${{ secrets.SMTP_USER }}
+            Fecha UTC: ${{ github.run_started_at }}
