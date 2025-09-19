@@ -88,38 +88,17 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Build email summary
+      - name: Build pretty email (Node)
         if: always()
-        id: email_body
-        shell: bash
-        run: |
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          STATUS="passed"
-          if [ "${{ steps.run_tests.outputs.exit_code }}" != "0" ]; then STATUS="failed"; fi
-
-          PASSED=$(jq '[.suites[]?.specs[]?.tests[]? | select(any(.results[]?; .status=="passed"))] | length' playwright-results.json 2>/dev/null || echo 0)
-          FAILED=$(jq '[.suites[]?.specs[]?.tests[]? | select(any(.results[]?; .status=="failed"))] | length' playwright-results.json 2>/dev/null || echo 0)
-          SKIPPED=$(jq '[.suites[]?.specs[]?.tests[]? | select(all(.results[]?; .status=="skipped"))] | length' playwright-results.json 2>/dev/null || echo 0)
-
-          cat > email.html << 'EOF'
-          <h2>Resultados Playwright: {{STATUS}}</h2>
-          <ul>
-            <li>✅ Pasados: {{PASSED}}</li>
-            <li>❌ Fallados: {{FAILED}}</li>
-            <li>⏭️ Omitidos: {{SKIPPED}}</li>
-          </ul>
-          <p>Descarga el <b>reporte HTML</b> y media desde los artefactos del run:</p>
-          <p><a href="{{RUN_URL}}">{{RUN_URL}}</a></p>
-          <p>Repo: <code>{{REPO}}</code> • Rama: <code>{{BRANCH}}</code></p>
-          EOF
-
-          sed -i "s/{{STATUS}}/$STATUS/g" email.html
-          sed -i "s/{{PASSED}}/$PASSED/g" email.html
-          sed -i "s/{{FAILED}}/$FAILED/g" email.html
-          sed -i "s/{{SKIPPED}}/$SKIPPED/g" email.html
-          sed -i "s|{{RUN_URL}}|$RUN_URL|g" email.html
-          sed -i "s|{{REPO}}|${{ github.repository }}|g" email.html
-          sed -i "s|{{BRANCH}}|${{ github.ref_name }}|g" email.html
+        run: node scripts/render-email.mjs
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          STATUS: ${{ steps.run_tests.outputs.exit_code == '0' && 'passed' || 'failed' }}
+          COMMIT_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+        
 
       # Chequea tamaño del ZIP (8MB máx adjunto)
       - name: Check ZIP size
